@@ -16,6 +16,11 @@ plonk = ["bellman/plonk"]
 allocator = ["bellman/allocator"]
  
 [dependencies]
+derivative = "2"
+
+# boojum = {package = "boojum", path = "../boojum" }
+boojum = {git = "https://github.com/matter-labs/boojum.git", branch = "main"}
+
 rand = "0.4"
 digest = "0.9"
 byteorder = "1"
@@ -35,7 +40,7 @@ num-derive = "0.2"
 indexmap = "1.9"
 smallvec = "1.10"
 
-# bellman = { package = "bellman_ce", path = "../../bellman/plonk" }
+# bellman = { package = "bellman_ce", path = "../bellman" }
 bellman = { package = "bellman_ce", git = "https://github.com/matter-labs/bellman", branch = "dev" }
 blake2-rfc_bellman_edition = "0.0.1"
 #poseidon_hash = { path = "../poseidon_hash" }
