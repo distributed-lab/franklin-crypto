@@ -28,6 +28,13 @@ impl<E: Engine, CS: ConstraintSystem<E>> std::fmt::Display for GoldilocksAsField
     }
 }
 
+impl<E: Engine, CS: ConstraintSystem<E>> GoldilocksAsFieldWrapper<E, CS> {
+    pub fn conditionally_select(cs: &mut CS, bit: Boolean, first: &Self, second: &Self) -> Self {
+        let inner = GoldilocksField::conditionally_select(cs, bit, &first.inner, &second.inner).unwrap();
+        inner.into()
+    }
+}
+
 impl<E: Engine, CS: ConstraintSystem<E>> PrimeFieldLike for GoldilocksAsFieldWrapper<E, CS>
 where
     CS: 'static,
@@ -130,6 +137,56 @@ impl<E: Engine, CS: ConstraintSystem<E>> std::fmt::Display for GoldilocksExtAsFi
         writeln!(f, "Num as PrimeFieldLike{{")?;
         writeln!(f, "inner field coeffs: {:?},", self.inner)?;
         writeln!(f, "}}")
+    }
+}
+
+impl<E: Engine, CS: ConstraintSystem<E>> GoldilocksExtAsFieldWrapper<E, CS> {
+    pub fn conditionally_select(cs: &mut CS, bit: Boolean, first: &Self, second: &Self) -> Self {
+        let inner = GoldilocksFieldExt::conditionally_select(cs, bit, &first.inner, &second.inner).unwrap();
+        inner.into()
+    }
+
+    pub fn from_coeffs_in_base(coeffs: [GoldilocksField<E>; 2]) -> Self {
+        let inner = GoldilocksFieldExt::from_coords(coeffs);
+        inner.into()
+    }
+
+    pub const fn into_coeffs_in_base(self) -> [GoldilocksField<E>; 2] {
+        [self.inner.inner[0], self.inner.inner[1]]
+    }
+
+    pub fn from_wrapper_coeffs_in_base(coeffs: [GoldilocksAsFieldWrapper<E, CS>; 2]) -> Self {
+        let coeffs = [
+            coeffs[0].inner,
+            coeffs[1].inner,
+        ];
+        Self::from_coeffs_in_base(coeffs)
+    }
+
+    pub fn mul_by_base_and_accumulate_into(
+        dst: &mut Self,
+        base: &GoldilocksAsFieldWrapper<E, CS>,
+        other: &Self,
+        cs: &mut CS,
+    ) -> Result<(), SynthesisError> {
+        for (dst, src) in dst.inner.inner.iter_mut()
+            .zip(other.inner.inner.iter()) {
+            *dst = dst.mul_add(cs, src, &base.inner)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn mul_assign_by_base(
+        &mut self, 
+        cs: &mut CS, 
+        base: &GoldilocksAsFieldWrapper<E, CS>
+    ) -> Result<(), SynthesisError> {
+        for dst in self.inner.inner.iter_mut() {
+            *dst = dst.mul(cs, &base.inner)?;
+        }
+
+        Ok(())
     }
 }
 
