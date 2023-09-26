@@ -2,9 +2,13 @@ name: Build and compile
 
 on:
   push:
-    branches: ["dev"]
+    branches:
+      - dev
+      - snark_wrapper
   pull_request:
-    branches: ["dev"]
+    branches:
+      - dev
+      - snark_wrapper
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -28,12 +32,10 @@ jobs:
       - name: Setup rust
         run: |
           rustup set profile minimal
-          rustup toolchain install nightly-2022-08-23
-          rustup default nightly-2022-08-23
+          rustup toolchain install nightly-2023-08-23
+          rustup default nightly-2023-08-23
       - name: Install build dependencies
         run: |
-          git config --global --add url."https://${{ secrets.ZKSYNC_ADMIN_BOT_ORG_REPO_WRITE }}:x-oauth-basic@github.com/".insteadOf ssh://git@github.com/
-          git config --global --add url."https://${{ secrets.ZKSYNC_ADMIN_BOT_ORG_REPO_WRITE }}:x-oauth-basic@github.com/".insteadOf https://github.com/
           sudo apt update && sudo apt install -y pkg-config libssl-dev libclang-dev gcc g++
       - name: Compile
         run: |
