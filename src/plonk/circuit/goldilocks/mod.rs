@@ -130,7 +130,7 @@ impl<E: Engine> GoldilocksField<E> {
         }
     }
 
-    fn into_u64(self) -> Option<u64> {
+    pub fn into_u64(self) -> Option<u64> {
         if let Some(value) = self.inner.get_value() {
             let value_buffer = value.into_repr();
             for el in value_buffer.as_ref().iter().skip(1) {
@@ -142,7 +142,7 @@ impl<E: Engine> GoldilocksField<E> {
         }
     }
 
-    fn into_field(self) -> Option<GL> {
+    pub fn into_field(self) -> Option<GL> {
         self.into_u64().map(|value| GL::from_u64_unchecked(value))
     }
     

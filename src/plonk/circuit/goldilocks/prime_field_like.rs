@@ -171,7 +171,7 @@ impl<E: Engine, CS: ConstraintSystem<E>> GoldilocksExtAsFieldWrapper<E, CS> {
     ) -> Result<(), SynthesisError> {
         for (dst, src) in dst.inner.inner.iter_mut()
             .zip(other.inner.inner.iter()) {
-            *dst = dst.mul_add(cs, src, &base.inner)?;
+            *dst = src.mul_add(cs, &base.inner, dst)?;
         }
 
         Ok(())
