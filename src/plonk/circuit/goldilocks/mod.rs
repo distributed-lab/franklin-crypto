@@ -1,68 +1,42 @@
+use itertools::all;
 use num_traits::ops::overflowing;
 
-use crate::bellman::pairing::{
-    Engine,
-};
-
-use crate::bellman::pairing::ff::{
-    Field,
-    PrimeField,
-    PrimeFieldRepr,
-    BitIterator
-};
-
-use crate::bellman::{
-    SynthesisError,
-};
+use crate::bellman::pairing::ff::{BitIterator, Field, PrimeField, PrimeFieldRepr};
+use crate::bellman::pairing::Engine;
+use crate::bellman::SynthesisError;
 
 use plonk::circuit::boolean::Boolean;
 
 use crate::bellman::plonk::better_better_cs::cs::{
-    Variable, 
-    ConstraintSystem,
-    ArithmeticTerm,
-    MainGateTerm,
+    ArithmeticTerm, Coefficient, ConstraintSystem, Gate, GateInternal, LinearCombinationOfTerms,
+    MainGate, MainGateTerm, PlonkConstraintSystemParams, PlonkCsWidth4WithNextStepParams,
+    PolynomialInConstraint, PolynomialMultiplicativeTerm, TimeDilation, TrivialAssembly, Variable,
     Width4MainGateWithDNext,
-    MainGate,
-    GateInternal,
-    Gate,
-    LinearCombinationOfTerms,
-    PolynomialMultiplicativeTerm,
-    PolynomialInConstraint,
-    TimeDilation,
-    Coefficient,
-    PlonkConstraintSystemParams,
-    PlonkCsWidth4WithNextStepParams,
-    TrivialAssembly
 };
 
-use crate::plonk::circuit::Assignment;
-use super::*;
 use super::bigint::*;
+use super::*;
+use crate::plonk::circuit::Assignment;
 
 use crate::plonk::circuit::allocated_num::{AllocatedNum, Num};
-use crate::plonk::circuit::simple_term::{Term};
 use crate::plonk::circuit::linear_combination::LinearCombination;
+use crate::plonk::circuit::simple_term::Term;
 
 use plonk::circuit::bigint_new::{
-    enforce_range_check_using_naive_approach,
-    enforce_range_check_using_bitop_table,
-    BITWISE_LOGICAL_OPS_TABLE_NAME
+    enforce_range_check_using_bitop_table, enforce_range_check_using_naive_approach,
+    BITWISE_LOGICAL_OPS_TABLE_NAME,
 };
 
 use boojum::field::{
-    goldilocks::GoldilocksField as GL,
-    U64Representable,
-    PrimeField as PF,
-    goldilocks::GoldilocksExt2,
-    ExtensionField
+    goldilocks::GoldilocksExt2, goldilocks::GoldilocksField as GL, ExtensionField,
+    PrimeField as PF, U64Representable,
 };
 
-use std::result;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use derivative::*;
 use std::hash::{Hash, Hasher};
+use std::result;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 pub mod prime_field_like;
 
@@ -82,7 +56,7 @@ impl<E: Engine> Hash for GoldilocksField<E> {
 fn range_check_for_num_bits<E: Engine, CS: ConstraintSystem<E>>(
     cs: &mut CS,
     num: &Num<E>,
-    num_bits: usize
+    num_bits: usize,
 ) -> Result<(), SynthesisError> {
     assert!(num_bits % 16 == 0);
 
@@ -145,14 +119,14 @@ impl<E: Engine> GoldilocksField<E> {
     pub fn into_field(self) -> Option<GL> {
         self.into_u64().map(|value| GL::from_u64_unchecked(value))
     }
-    
+
     pub fn is_constant(&self) -> bool {
         self.inner.is_constant()
     }
 
     pub fn alloc<CS: ConstraintSystem<E>>(
         cs: &mut CS,
-        witness: Option<E::Fr>
+        witness: Option<E::Fr>,
     ) -> Result<Self, SynthesisError> {
         let num = Num::alloc(cs, witness)?;
         Self::from_num(cs, num)
@@ -160,7 +134,7 @@ impl<E: Engine> GoldilocksField<E> {
 
     pub fn alloc_from_u64<CS: ConstraintSystem<E>>(
         cs: &mut CS,
-        witness: Option<u64>
+        witness: Option<u64>,
     ) -> Result<Self, SynthesisError> {
         let witness = witness.map(|value| E::Fr::from_repr(value.into()).unwrap());
         Self::alloc(cs, witness)
@@ -168,28 +142,27 @@ impl<E: Engine> GoldilocksField<E> {
 
     pub fn alloc_from_field<CS: ConstraintSystem<E>>(
         cs: &mut CS,
-        witness: Option<GL>
+        witness: Option<GL>,
     ) -> Result<Self, SynthesisError> {
         let witness = witness.map(|value| value.as_u64_reduced());
         Self::alloc_from_u64(cs, witness)
     }
 
     pub unsafe fn from_num_unchecked(num: Num<E>) -> Result<Self, SynthesisError> {
-        Ok(Self {
-            inner: num,
-        })
+        Ok(Self { inner: num })
     }
 
-    pub fn from_num<CS: ConstraintSystem<E>>(cs: &mut CS, num: Num<E>) -> Result<Self, SynthesisError> {
+    pub fn from_num<CS: ConstraintSystem<E>>(
+        cs: &mut CS,
+        num: Num<E>,
+    ) -> Result<Self, SynthesisError> {
         let remainder = Num::Constant(E::Fr::from_repr(Self::REMAINDER.into()).unwrap());
         range_check_for_num_bits(cs, &num, 64)?;
 
         let check = num.add(cs, &remainder)?;
         range_check_for_num_bits(cs, &check, 64)?;
 
-        Ok(Self {
-            inner: num,
-        })
+        Ok(Self { inner: num })
     }
 
     pub fn into_num(&self) -> Num<E> {
@@ -197,10 +170,14 @@ impl<E: Engine> GoldilocksField<E> {
     }
 
     pub fn from_num_to_multiple_with_reduction<CS: ConstraintSystem<E>, const N: usize>(
-        cs: &mut CS, 
-        num: Num<E>
+        cs: &mut CS,
+        num: Num<E>,
     ) -> Result<[Self; N], SynthesisError> {
-        assert!(N * Self::ORDER_BITS <= E::Fr::CAPACITY as usize, "scalar field capacity is too small");
+        assert_eq!(Self::ORDER_BITS, 64, "Only this case is supported for now");
+        assert!(
+            N * Self::ORDER_BITS <= E::Fr::CAPACITY as usize,
+            "Scalar field capacity is too small"
+        );
         let mut result = [Self::constant(0); N];
 
         if let Num::Constant(value) = num {
@@ -208,63 +185,111 @@ impl<E: Engine> GoldilocksField<E> {
 
             for (i, el) in repr.as_ref()[..N].iter().enumerate() {
                 result[i] = Self::constant(el % Self::ORDER);
-            }       
+            }
         } else {
-            let mut chunks = [None; N];
+            let mut u64_chunks = vec![];
             let mut overflowing = [None; N];
-            let mut rest = vec![];
             if let Some(value) = num.get_value() {
                 let repr = value.into_repr();
 
                 for (i, el) in repr.as_ref()[..N].iter().enumerate() {
-                    overflowing[i] = Some(*el > Self::ORDER);
-                    chunks[i] = Some(el % Self::ORDER);
+                    overflowing[i] = Some(*el >= Self::ORDER);
                 }
-                rest.extend(repr.as_ref().iter().skip(N).map(|el| Some(*el)));
+                u64_chunks = repr.as_ref().iter().map(|el| Some(*el)).collect();
             } else {
                 let repr = <E::Fr as PrimeField>::Repr::default();
-                rest.extend(vec![None; repr.as_ref().len() - N]);
+                u64_chunks = vec![None; repr.as_ref().len()];
             }
+
+            // Firstly we check that chunks sum is correct
+            let mut allocated_chunks = vec![];
 
             let mut coeff = E::Fr::one();
             let mut shift_repr = E::Fr::one().into_repr();
             shift_repr.shl(Self::ORDER_BITS as u32);
             let shift = E::Fr::from_repr(shift_repr).unwrap();
 
-            let mut shifted_modulus = E::Fr::from_repr(Self::ORDER.into()).unwrap();
-
             let mut minus_one = E::Fr::one();
             minus_one.negate();
 
             let mut lc = LinearCombination::<E>::zero();
-            for i in 0..N {
-                let chunk = Self::alloc_from_u64(cs, chunks[i])?;
-                lc.add_assign_number_with_coeff(&chunk.inner, coeff);
+            for chunk in u64_chunks {
+                let witness = chunk.map(|value| E::Fr::from_repr(value.into()).unwrap());
+                let allocated_chunk = Num::alloc(cs, witness)?;
+                range_check_for_num_bits(cs, &allocated_chunk, 64)?;
+                lc.add_assign_number_with_coeff(&allocated_chunk, coeff);
                 coeff.mul_assign(&shift);
-
-                let overflow = Boolean::alloc(cs, overflowing[i])?;
-                lc.add_assign_boolean_with_coeff(&overflow, coeff);
-                shifted_modulus.mul_assign(&shift);
-
-                result[i] = chunk;
-            }
-            for el in rest {
-                let rest = Num::alloc(cs, el.map(|value| E::Fr::from_repr(value.into()).unwrap()))?;
-                range_check_for_num_bits(cs, &rest, 64)?;
-                lc.add_assign_number_with_coeff(&rest, coeff);
-                coeff.mul_assign(&shift);
+                allocated_chunks.push(allocated_chunk)
             }
             lc.add_assign_number_with_coeff(&num, minus_one);
             lc.enforce_zero(cs)?;
+
+            // Now we check that there is no overflow
+            assert_eq!(
+                allocated_chunks.len(),
+                4,
+                "Only this case is supported for now"
+            );
+
+            let mut first_u128_chunk: LinearCombination<E> = allocated_chunks[0].into();
+            first_u128_chunk.add_assign_number_with_coeff(&allocated_chunks[1], shift);
+            let first_u128_chunk = first_u128_chunk.into_num(cs)?;
+
+            let mut second_u128_chunk: LinearCombination<E> = allocated_chunks[2].into();
+            second_u128_chunk.add_assign_number_with_coeff(&allocated_chunks[3], shift);
+            let second_u128_chunk = second_u128_chunk.into_num(cs)?;
+
+            let max_field_element = minus_one;
+            let (first_max_element_chunk, second_max_element_chunk) = {
+                let fe_repr: Vec<_> = max_field_element
+                    .into_repr()
+                    .as_ref()
+                    .iter()
+                    .map(|value| E::Fr::from_repr((*value).into()).unwrap())
+                    .collect();
+
+                let mut first_chunk = fe_repr[1];
+                first_chunk.mul_assign(&shift);
+                first_chunk.add_assign(&fe_repr[0]);
+
+                let mut second_chunk = fe_repr[3];
+                second_chunk.mul_assign(&shift);
+                second_chunk.add_assign(&fe_repr[2]);
+
+                (Num::Constant(first_chunk), Num::Constant(second_chunk))
+            };
+
+            let check = second_max_element_chunk.sub(cs, &second_u128_chunk)?;
+            range_check_for_num_bits(cs, &check, 128)?;
+            let flag = check.is_zero(cs)?.not();
+
+            let mut double_shift_repr = E::Fr::one().into_repr();
+            double_shift_repr.shl(2 * Self::ORDER_BITS as u32);
+            let double_shift = E::Fr::from_repr(double_shift_repr).unwrap();
+
+            let mut check_2: LinearCombination<E> = first_max_element_chunk.into();
+            check_2.add_assign_number_with_coeff(&first_u128_chunk, minus_one);
+            check_2.add_assign_boolean_with_coeff(&flag, double_shift);
+            let check_2 = check_2.into_num(cs)?;
+            range_check_for_num_bits(cs, &check_2, 144)?;
+
+            // Now we can get Goldilocks elements from N u64 chunks
+            let mut neg_modulus = E::Fr::from_repr(Self::ORDER.into()).unwrap();
+            neg_modulus.negate();
+            for i in 0..N {
+                let mut result_element: LinearCombination<E> = allocated_chunks[i].into();
+                let overflow_flag = Boolean::alloc(cs, overflowing[i])?;
+                result_element.add_assign_boolean_with_coeff(&overflow_flag, neg_modulus);
+                let result_num = result_element.into_num(cs)?;
+
+                result[i] = Self::from_num(cs, result_num)?;
+            }
         }
 
         Ok(result)
     }
 
-    pub fn negate<CS: ConstraintSystem<E>>(
-        &self,
-        cs: &mut CS,
-    ) -> Result<Self, SynthesisError> {
+    pub fn negate<CS: ConstraintSystem<E>>(&self, cs: &mut CS) -> Result<Self, SynthesisError> {
         let order = Num::Constant(E::Fr::from_repr(Self::ORDER.into()).unwrap());
         let negate = order.sub(cs, &self.inner)?;
         Ok(Self { inner: negate })
@@ -288,7 +313,8 @@ impl<E: Engine> GoldilocksField<E> {
         order.negate();
         let minus_order = Num::Constant(order);
 
-        let overflow = if let (Some(a), Some(b)) = (self.inner.get_value(), other.inner.get_value()) {
+        let overflow = if let (Some(a), Some(b)) = (self.inner.get_value(), other.inner.get_value())
+        {
             let a = a.into_repr().as_ref()[0] as u128;
             let b = b.into_repr().as_ref()[0] as u128;
 
@@ -308,11 +334,8 @@ impl<E: Engine> GoldilocksField<E> {
 
         Self::from_num(cs, result)
     }
-    
-    pub fn inverse<CS: ConstraintSystem<E>>(
-        &self,
-        cs: &mut CS,
-    ) -> Result<Self, SynthesisError> {
+
+    pub fn inverse<CS: ConstraintSystem<E>>(&self, cs: &mut CS) -> Result<Self, SynthesisError> {
         let mut inverse_witness = self.into_field();
         inverse_witness = inverse_witness.map(|el| el.inverse().expect("should be invertible"));
         let inverse = Self::alloc_from_field(cs, inverse_witness)?;
@@ -340,7 +363,9 @@ impl<E: Engine> GoldilocksField<E> {
         other: &Self,
         third: &Self,
     ) -> Result<Self, SynthesisError> {
-        if let (Num::Constant(a), Num::Constant(b), Num::Constant(c)) = (&self.inner, &other.inner, &third.inner) {
+        if let (Num::Constant(a), Num::Constant(b), Num::Constant(c)) =
+            (&self.inner, &other.inner, &third.inner)
+        {
             let a = a.into_repr().as_ref()[0] as u128;
             let b = b.into_repr().as_ref()[0] as u128;
             let c = c.into_repr().as_ref()[0] as u128;
@@ -354,7 +379,11 @@ impl<E: Engine> GoldilocksField<E> {
         order.negate();
         let minus_order = Num::Constant(order);
 
-        let overflow = if let (Some(a), Some(b), Some(c)) = (self.inner.get_value(), other.inner.get_value(), third.inner.get_value()) {
+        let overflow = if let (Some(a), Some(b), Some(c)) = (
+            self.inner.get_value(),
+            other.inner.get_value(),
+            third.inner.get_value(),
+        ) {
             let a = a.into_repr().as_ref()[0] as u128;
             let b = b.into_repr().as_ref()[0] as u128;
             let c = c.into_repr().as_ref()[0] as u128;
@@ -381,7 +410,7 @@ impl<E: Engine> GoldilocksField<E> {
         this: &Self,
         other: &Self,
     ) -> Result<Boolean, SynthesisError> {
-        Num::equals(cs, &this.inner,&other.inner)
+        Num::equals(cs, &this.inner, &other.inner)
     }
 
     pub fn enforce_equal<CS: ConstraintSystem<E>>(
@@ -396,11 +425,11 @@ impl<E: Engine> GoldilocksField<E> {
         cs: &mut CS,
         bit: Boolean,
         first: &Self,
-        second: &Self
+        second: &Self,
     ) -> Result<Self, SynthesisError> {
         let result = Num::conditionally_select(cs, &bit, &first.inner, &second.inner)?;
 
-        Ok(Self { inner: result} )
+        Ok(Self { inner: result })
     }
 
     pub fn spread_into_bits<CS: ConstraintSystem<E>, const LIMIT: usize>(
@@ -447,7 +476,7 @@ impl<E: Engine> GoldilocksField<E> {
     }
 }
 
-pub type GLExt = ExtensionField::<GL, 2, GoldilocksExt2>;
+pub type GLExt = ExtensionField<GL, 2, GoldilocksExt2>;
 
 /// Extension with poly x^2 - 7
 #[derive(Derivative)]
@@ -489,7 +518,7 @@ impl<E: Engine> GoldilocksFieldExt<E> {
 
     pub fn alloc_from_field_ext<CS: ConstraintSystem<E>>(
         cs: &mut CS,
-        witness: Option<GLExt>
+        witness: Option<GLExt>,
     ) -> Result<Self, SynthesisError> {
         let (x_witness, y_witness);
         if let Some(witness) = witness {
@@ -504,23 +533,26 @@ impl<E: Engine> GoldilocksFieldExt<E> {
             inner: [
                 GoldilocksField::alloc_from_field(cs, x_witness)?,
                 GoldilocksField::alloc_from_field(cs, y_witness)?,
-            ]
+            ],
         })
     }
 
     pub fn constant_from_field(value: GL) -> Self {
-        Self::from_coords([GoldilocksField::constant_from_field(value), GoldilocksField::zero()])
+        Self::from_coords([
+            GoldilocksField::constant_from_field(value),
+            GoldilocksField::zero(),
+        ])
     }
 
     pub fn from_num_coords<CS: ConstraintSystem<E>>(
-        cs: &mut CS, 
-        inner: [Num<E>; 2]
+        cs: &mut CS,
+        inner: [Num<E>; 2],
     ) -> Result<Self, SynthesisError> {
-        Ok(Self { 
+        Ok(Self {
             inner: [
-            GoldilocksField::from_num(cs, inner[0])?,
-            GoldilocksField::from_num(cs, inner[1])?,
-            ] 
+                GoldilocksField::from_num(cs, inner[0])?,
+                GoldilocksField::from_num(cs, inner[1])?,
+            ],
         })
     }
 
@@ -539,13 +571,10 @@ impl<E: Engine> GoldilocksFieldExt<E> {
         self.inner[0].is_constant() && self.inner[1].is_constant()
     }
 
-    pub fn negate<CS: ConstraintSystem<E>>(
-        &self,
-        cs: &mut CS,
-    ) -> Result<Self, SynthesisError> {
+    pub fn negate<CS: ConstraintSystem<E>>(&self, cs: &mut CS) -> Result<Self, SynthesisError> {
         let x = self.inner[0].negate(cs)?;
         let y = self.inner[1].negate(cs)?;
-        
+
         Ok(GoldilocksFieldExt::from_coords([x, y]).into())
     }
 
@@ -562,10 +591,7 @@ impl<E: Engine> GoldilocksFieldExt<E> {
         Ok(Self::from_coords(result))
     }
 
-    pub fn inverse<CS: ConstraintSystem<E>>(
-        &self,
-        cs: &mut CS,
-    ) -> Result<Self, SynthesisError> {
+    pub fn inverse<CS: ConstraintSystem<E>>(&self, cs: &mut CS) -> Result<Self, SynthesisError> {
         let mut field_ext = self.into_field_ext();
         field_ext = field_ext.map(|x| x.inverse().expect("should be non-zero"));
         let inversed = Self::alloc_from_field_ext(cs, field_ext)?;
@@ -587,14 +613,13 @@ impl<E: Engine> GoldilocksFieldExt<E> {
     ) -> Result<Self, SynthesisError> {
         let mut res_witness = [None; 2];
         let mut divs = [None; 2];
-        if let (
-            Some(a_x), Some(a_y),
-            Some(b_x), Some(b_y),
-            Some(c_x), Some(c_y),
-        ) = (
-            &self.inner[0].inner.get_value(),  &self.inner[1].inner.get_value(), 
-            &other.inner[0].inner.get_value(), &other.inner[1].inner.get_value(),
-            &third.inner[0].inner.get_value(), &third.inner[1].inner.get_value(),
+        if let (Some(a_x), Some(a_y), Some(b_x), Some(b_y), Some(c_x), Some(c_y)) = (
+            &self.inner[0].inner.get_value(),
+            &self.inner[1].inner.get_value(),
+            &other.inner[0].inner.get_value(),
+            &other.inner[1].inner.get_value(),
+            &third.inner[0].inner.get_value(),
+            &third.inner[1].inner.get_value(),
         ) {
             let a_x = a_x.into_repr().as_ref()[0] as u128;
             let a_y = a_y.into_repr().as_ref()[0] as u128;
@@ -605,7 +630,8 @@ impl<E: Engine> GoldilocksFieldExt<E> {
 
             // first coordinate
             let mut res_x_part = a_y * b_y;
-            let mut div_x = (res_x_part / GoldilocksField::<E>::ORDER as u128) * Self::NON_RESIDUE as u128;
+            let mut div_x =
+                (res_x_part / GoldilocksField::<E>::ORDER as u128) * Self::NON_RESIDUE as u128;
             res_x_part %= GoldilocksField::<E>::ORDER as u128;
 
             let mut res_x = a_x * b_x;
@@ -635,11 +661,10 @@ impl<E: Engine> GoldilocksFieldExt<E> {
         }
 
         if self.is_constant() && other.is_constant() {
-            return Ok(
-                Self::constant(
-                    [res_witness[0].unwrap(), res_witness[1].unwrap()]
-                )
-            );
+            return Ok(Self::constant([
+                res_witness[0].unwrap(),
+                res_witness[1].unwrap(),
+            ]));
         }
 
         let result = [
@@ -647,10 +672,7 @@ impl<E: Engine> GoldilocksFieldExt<E> {
             GoldilocksField::alloc_from_u64(cs, res_witness[1])?,
         ];
 
-        let divs = [
-            Num::alloc(cs, divs[0])?,
-            Num::alloc(cs, divs[1])?
-        ];
+        let divs = [Num::alloc(cs, divs[0])?, Num::alloc(cs, divs[1])?];
         range_check_for_num_bits(cs, &divs[0], 80)?;
         range_check_for_num_bits(cs, &divs[1], 80)?;
 
@@ -662,7 +684,6 @@ impl<E: Engine> GoldilocksFieldExt<E> {
         let order = GoldilocksField::<E>::ORDER;
         let mut minus_order = E::Fr::from_repr(order.into()).unwrap();
         minus_order.negate();
-
 
         // check first coordinate
         let v_0 = self.inner[0].inner.mul(cs, &other.inner[0].inner)?;
@@ -676,7 +697,6 @@ impl<E: Engine> GoldilocksFieldExt<E> {
         lc.add_assign_number_with_coeff(&divs[0], minus_order);
         lc.enforce_zero(cs)?;
 
-
         // check second coordinate
         let v_0 = self.inner[0].inner.mul(cs, &other.inner[1].inner)?;
         let v_1 = self.inner[1].inner.mul(cs, &other.inner[0].inner)?;
@@ -688,7 +708,6 @@ impl<E: Engine> GoldilocksFieldExt<E> {
         lc.add_assign_number_with_coeff(&result[1].inner, minus_one);
         lc.add_assign_number_with_coeff(&divs[1], minus_order);
         lc.enforce_zero(cs)?;
-
 
         Ok(Self::from_coords(result))
     }
@@ -728,7 +747,7 @@ impl<E: Engine> GoldilocksFieldExt<E> {
         cs: &mut CS,
         bit: Boolean,
         first: &Self,
-        second: &Self
+        second: &Self,
     ) -> Result<Self, SynthesisError> {
         let mut result = [GoldilocksField::zero(); 2];
         for i in 0..Self::EXTENSION_DEGREE {
@@ -736,7 +755,7 @@ impl<E: Engine> GoldilocksFieldExt<E> {
                 cs,
                 bit.clone(),
                 &first.inner[i],
-                &second.inner[i]
+                &second.inner[i],
             )?;
         }
 
@@ -766,30 +785,35 @@ mod test {
     use super::*;
     use crate::bellman::plonk::better_better_cs::cs::*;
     extern crate boojum;
-    
+
     use crate::bellman::pairing::bn256::{Bn256, Fr};
-    use rand::Rng;
-    use boojum::field::U64Representable;
-    use boojum::field::SmallField;
     use boojum::field::Field;
+    use boojum::field::SmallField;
+    use boojum::field::U64Representable;
+    use rand::{Rand, Rng};
 
     #[test]
     fn test_goldilocks_field() {
-        let mut assembly = TrivialAssembly::<Bn256, PlonkCsWidth4WithNextStepParams, Width4MainGateWithDNext>::new();
+        let mut assembly = TrivialAssembly::<
+            Bn256,
+            PlonkCsWidth4WithNextStepParams,
+            Width4MainGateWithDNext,
+        >::new();
         let _before = assembly.n();
 
         let mut rng = rand::thread_rng();
         let buffer_u64 = [0; 10].map(|_| rng.gen_range(0, GL::CHAR));
         let buffer_gl = buffer_u64.map(|x| GL::from_u64_unchecked(x));
 
-        let buffer_circuit = buffer_u64.map(|x| 
-            GoldilocksField::alloc_from_u64(&mut assembly, Some(x)).unwrap()
-        );
-        // let buffer_circuit = buffer_u64.map(|x| 
+        let buffer_circuit =
+            buffer_u64.map(|x| GoldilocksField::alloc_from_u64(&mut assembly, Some(x)).unwrap());
+        // let buffer_circuit = buffer_u64.map(|x|
         //     GoldilocksField::constant(x)
         // );
 
-        let circuit_sum = buffer_circuit[0].add(&mut assembly, &buffer_circuit[1]).unwrap();
+        let circuit_sum = buffer_circuit[0]
+            .add(&mut assembly, &buffer_circuit[1])
+            .unwrap();
         let mut gl_sum = buffer_gl[0];
         gl_sum.add_assign(&buffer_gl[1]);
 
@@ -802,7 +826,6 @@ mod test {
             PolyIdentifier::VariablesPolynomial(2),
         ];
 
-
         let name = BITWISE_LOGICAL_OPS_TABLE_NAME;
         let bitwise_logic_table = LookupTableApplication::new(
             name,
@@ -813,12 +836,9 @@ mod test {
         );
         assembly.add_table(bitwise_logic_table).unwrap();
 
-
-        let circuit_fma = buffer_circuit[2].mul_add(
-            &mut assembly, 
-            &buffer_circuit[3], 
-            &buffer_circuit[4]
-        ).unwrap();
+        let circuit_fma = buffer_circuit[2]
+            .mul_add(&mut assembly, &buffer_circuit[3], &buffer_circuit[4])
+            .unwrap();
 
         let mut gl_fma = buffer_gl[2];
         gl_fma.mul_assign(&buffer_gl[3]);
@@ -828,15 +848,31 @@ mod test {
 
         let mut repr = Fr::default().into_repr();
         repr.as_mut()[..3].copy_from_slice(&buffer_u64[5..8]);
-        let combined = Num::alloc(
-            &mut assembly,
-            Some(Fr::from_repr(repr).unwrap())
-        ).unwrap();
+        let combined = Num::alloc(&mut assembly, Some(Fr::from_repr(repr).unwrap())).unwrap();
 
-        let parts = GoldilocksField::from_num_to_multiple_with_reduction::<_, 3>(&mut assembly, combined).unwrap();
+        let parts =
+            GoldilocksField::from_num_to_multiple_with_reduction::<_, 3>(&mut assembly, combined)
+                .unwrap();
 
         for (i, part) in parts.into_iter().enumerate() {
             assert_eq!(Some(buffer_u64[5 + i]), (*part).into_u64());
+        }
+
+        let random_fr = Fr::rand(&mut rng);
+        let constant_random_fr = Num::Constant(random_fr);
+        let allocated_random_fr = Num::alloc(&mut assembly, Some(random_fr)).unwrap();
+        let expected = GoldilocksField::from_num_to_multiple_with_reduction::<_, 3>(
+            &mut assembly,
+            constant_random_fr,
+        )
+        .unwrap();
+        let actual = GoldilocksField::from_num_to_multiple_with_reduction::<_, 3>(
+            &mut assembly,
+            allocated_random_fr,
+        )
+        .unwrap();
+        for (exp, act) in expected.iter().zip(actual.iter()) {
+            exp.enforce_equal(&mut assembly, act).unwrap();
         }
 
         assert!(assembly.is_satisfied());
@@ -844,16 +880,19 @@ mod test {
 
     #[test]
     fn test_goldilocks_field_extension() {
-        let mut assembly = TrivialAssembly::<Bn256, PlonkCsWidth4WithNextStepParams, Width4MainGateWithDNext>::new();
+        let mut assembly = TrivialAssembly::<
+            Bn256,
+            PlonkCsWidth4WithNextStepParams,
+            Width4MainGateWithDNext,
+        >::new();
         let _before = assembly.n();
 
         let mut rng = rand::thread_rng();
         let buffer_u64 = [0; 10].map(|_| rng.gen_range(0, GL::CHAR));
 
-        let buffer_circuit = buffer_u64.map(|x| 
-            GoldilocksField::alloc_from_u64(&mut assembly, Some(x)).unwrap()
-        );
-        // let buffer_circuit = buffer_u64.map(|x| 
+        let buffer_circuit =
+            buffer_u64.map(|x| GoldilocksField::alloc_from_u64(&mut assembly, Some(x)).unwrap());
+        // let buffer_circuit = buffer_u64.map(|x|
         //     GoldilocksField::constant(x)
         // );
 
@@ -895,11 +934,12 @@ mod test {
 
         let fma_expected = GoldilocksFieldExt::<Bn256>::from_coords([x_coord, y_coord]);
 
-        fma_actual.enforce_equal(&mut assembly, &fma_expected).unwrap();
+        fma_actual
+            .enforce_equal(&mut assembly, &fma_expected)
+            .unwrap();
 
         let inversed = fma_actual.inverse(&mut assembly).unwrap();
 
         assert!(assembly.is_satisfied());
     }
-
 }
