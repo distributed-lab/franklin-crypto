@@ -196,6 +196,10 @@ impl<E: Engine> GoldilocksField<E> {
         self.inner
     }
 
+    /// This function is used in SNARK-wrapper to get Goldilocks challenges
+    /// from random Bn256 scalar field element. Usually, we use N = 3.
+    /// Note: we lose some information during this conversion, but it's OK.
+    /// We only care about good output distribution.
     pub fn from_num_to_multiple_with_reduction<CS: ConstraintSystem<E>, const N: usize>(
         cs: &mut CS,
         num: Num<E>,
