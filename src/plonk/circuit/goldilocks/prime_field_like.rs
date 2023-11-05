@@ -1,7 +1,7 @@
 use super::*;
 
-use boojum::field::goldilocks::GoldilocksField as GL;
 use boojum::field::traits::field_like::PrimeFieldLike;
+use boojum::field::goldilocks::GoldilocksField as GL;
 
 #[derive(Derivative)]
 #[derivative(Clone, Copy, Debug(bound = ""), Hash(bound = ""))]
@@ -11,9 +11,7 @@ pub struct GoldilocksAsFieldWrapper<E: Engine, CS: ConstraintSystem<E>> {
     _marker: std::marker::PhantomData<fn() -> CS>,
 }
 
-impl<E: Engine, CS: ConstraintSystem<E>> From<GoldilocksField<E>>
-    for GoldilocksAsFieldWrapper<E, CS>
-{
+impl<E: Engine, CS: ConstraintSystem<E>> From<GoldilocksField<E>> for GoldilocksAsFieldWrapper<E, CS> {
     fn from(value: GoldilocksField<E>) -> Self {
         Self {
             inner: value,
@@ -32,8 +30,7 @@ impl<E: Engine, CS: ConstraintSystem<E>> std::fmt::Display for GoldilocksAsField
 
 impl<E: Engine, CS: ConstraintSystem<E>> GoldilocksAsFieldWrapper<E, CS> {
     pub fn conditionally_select(cs: &mut CS, bit: Boolean, first: &Self, second: &Self) -> Self {
-        let inner =
-            GoldilocksField::conditionally_select(cs, bit, &first.inner, &second.inner).unwrap();
+        let inner = GoldilocksField::conditionally_select(cs, bit, &first.inner, &second.inner).unwrap();
         inner.into()
     }
 }
@@ -117,6 +114,7 @@ where
     }
 }
 
+
 #[derive(Derivative)]
 #[derivative(Clone, Copy, Debug(bound = ""), Hash(bound = ""))]
 pub struct GoldilocksExtAsFieldWrapper<E: Engine, CS: ConstraintSystem<E>> {
@@ -125,9 +123,7 @@ pub struct GoldilocksExtAsFieldWrapper<E: Engine, CS: ConstraintSystem<E>> {
     _marker: std::marker::PhantomData<fn() -> CS>,
 }
 
-impl<E: Engine, CS: ConstraintSystem<E>> From<GoldilocksFieldExt<E>>
-    for GoldilocksExtAsFieldWrapper<E, CS>
-{
+impl<E: Engine, CS: ConstraintSystem<E>> From<GoldilocksFieldExt<E>> for GoldilocksExtAsFieldWrapper<E, CS> {
     fn from(value: GoldilocksFieldExt<E>) -> Self {
         Self {
             inner: value,
@@ -146,8 +142,7 @@ impl<E: Engine, CS: ConstraintSystem<E>> std::fmt::Display for GoldilocksExtAsFi
 
 impl<E: Engine, CS: ConstraintSystem<E>> GoldilocksExtAsFieldWrapper<E, CS> {
     pub fn conditionally_select(cs: &mut CS, bit: Boolean, first: &Self, second: &Self) -> Self {
-        let inner =
-            GoldilocksFieldExt::conditionally_select(cs, bit, &first.inner, &second.inner).unwrap();
+        let inner = GoldilocksFieldExt::conditionally_select(cs, bit, &first.inner, &second.inner).unwrap();
         inner.into()
     }
 
@@ -161,7 +156,10 @@ impl<E: Engine, CS: ConstraintSystem<E>> GoldilocksExtAsFieldWrapper<E, CS> {
     }
 
     pub fn from_wrapper_coeffs_in_base(coeffs: [GoldilocksAsFieldWrapper<E, CS>; 2]) -> Self {
-        let coeffs = [coeffs[0].inner, coeffs[1].inner];
+        let coeffs = [
+            coeffs[0].inner,
+            coeffs[1].inner,
+        ];
         Self::from_coeffs_in_base(coeffs)
     }
 
@@ -171,7 +169,8 @@ impl<E: Engine, CS: ConstraintSystem<E>> GoldilocksExtAsFieldWrapper<E, CS> {
         other: &Self,
         cs: &mut CS,
     ) -> Result<(), SynthesisError> {
-        for (dst, src) in dst.inner.inner.iter_mut().zip(other.inner.inner.iter()) {
+        for (dst, src) in dst.inner.inner.iter_mut()
+            .zip(other.inner.inner.iter()) {
             *dst = src.mul_add(cs, &base.inner, dst)?;
         }
 
@@ -179,9 +178,9 @@ impl<E: Engine, CS: ConstraintSystem<E>> GoldilocksExtAsFieldWrapper<E, CS> {
     }
 
     pub fn mul_assign_by_base(
-        &mut self,
-        cs: &mut CS,
-        base: &GoldilocksAsFieldWrapper<E, CS>,
+        &mut self, 
+        cs: &mut CS, 
+        base: &GoldilocksAsFieldWrapper<E, CS>
     ) -> Result<(), SynthesisError> {
         for dst in self.inner.inner.iter_mut() {
             *dst = dst.mul(cs, &base.inner)?;
@@ -263,7 +262,7 @@ where
     fn inverse(&self, ctx: &mut Self::Context) -> Self {
         self.inner.inverse(ctx).unwrap().into()
     }
-
+    
     // constant creation
     fn constant(value: Self::Base, _ctx: &mut Self::Context) -> Self {
         GoldilocksFieldExt::constant_from_field(value).into()
