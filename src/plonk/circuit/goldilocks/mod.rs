@@ -196,11 +196,19 @@ impl<E: Engine> GoldilocksField<E> {
         self.inner
     }
 
+    /// This function is used in SNARK-wrapper to get Goldilocks challenges
+    /// from random Bn256 scalar field element. Usually, we use N = 3.
+    /// Note: we lose some information during this conversion, but it's OK.
+    /// We only care about good output distribution.
     pub fn from_num_to_multiple_with_reduction<CS: ConstraintSystem<E>, const N: usize>(
-        cs: &mut CS, 
-        num: Num<E>
+        cs: &mut CS,
+        num: Num<E>,
     ) -> Result<[Self; N], SynthesisError> {
-        assert!(N * Self::ORDER_BITS <= E::Fr::CAPACITY as usize, "scalar field capacity is too small");
+        assert_eq!(Self::ORDER_BITS, 64, "Only this case is supported for now");
+        assert!(
+            N * Self::ORDER_BITS <= E::Fr::CAPACITY as usize,
+            "Scalar field capacity is too small"
+        );
         let mut result = [Self::constant(0); N];
 
         if let Num::Constant(value) = num {
@@ -208,54 +216,105 @@ impl<E: Engine> GoldilocksField<E> {
 
             for (i, el) in repr.as_ref()[..N].iter().enumerate() {
                 result[i] = Self::constant(el % Self::ORDER);
-            }       
+            }
         } else {
-            let mut chunks = [None; N];
+            let mut u64_chunks = vec![];
             let mut overflowing = [None; N];
-            let mut rest = vec![];
             if let Some(value) = num.get_value() {
                 let repr = value.into_repr();
 
                 for (i, el) in repr.as_ref()[..N].iter().enumerate() {
-                    overflowing[i] = Some(*el > Self::ORDER);
-                    chunks[i] = Some(el % Self::ORDER);
+                    overflowing[i] = Some(*el >= Self::ORDER);
                 }
-                rest.extend(repr.as_ref().iter().skip(N).map(|el| Some(*el)));
+                u64_chunks = repr.as_ref().iter().map(|el| Some(*el)).collect();
             } else {
                 let repr = <E::Fr as PrimeField>::Repr::default();
-                rest.extend(vec![None; repr.as_ref().len() - N]);
+                u64_chunks = vec![None; repr.as_ref().len()];
             }
+
+            // Firstly we check that chunks sum is correct
+            let mut allocated_chunks = vec![];
 
             let mut coeff = E::Fr::one();
             let mut shift_repr = E::Fr::one().into_repr();
             shift_repr.shl(Self::ORDER_BITS as u32);
             let shift = E::Fr::from_repr(shift_repr).unwrap();
 
-            let mut shifted_modulus = E::Fr::from_repr(Self::ORDER.into()).unwrap();
-
             let mut minus_one = E::Fr::one();
             minus_one.negate();
 
             let mut lc = LinearCombination::<E>::zero();
-            for i in 0..N {
-                let chunk = Self::alloc_from_u64(cs, chunks[i])?;
-                lc.add_assign_number_with_coeff(&chunk.inner, coeff);
+            for chunk in u64_chunks {
+                let witness = chunk.map(|value| E::Fr::from_repr(value.into()).unwrap());
+                let allocated_chunk = Num::alloc(cs, witness)?;
+                range_check_for_num_bits(cs, &allocated_chunk, 64)?;
+                lc.add_assign_number_with_coeff(&allocated_chunk, coeff);
                 coeff.mul_assign(&shift);
-
-                let overflow = Boolean::alloc(cs, overflowing[i])?;
-                lc.add_assign_boolean_with_coeff(&overflow, coeff);
-                shifted_modulus.mul_assign(&shift);
-
-                result[i] = chunk;
-            }
-            for el in rest {
-                let rest = Num::alloc(cs, el.map(|value| E::Fr::from_repr(value.into()).unwrap()))?;
-                range_check_for_num_bits(cs, &rest, 64)?;
-                lc.add_assign_number_with_coeff(&rest, coeff);
-                coeff.mul_assign(&shift);
+                allocated_chunks.push(allocated_chunk)
             }
             lc.add_assign_number_with_coeff(&num, minus_one);
             lc.enforce_zero(cs)?;
+
+            // Now we check that there is no overflow
+            assert_eq!(
+                allocated_chunks.len(),
+                4,
+                "Only this case is supported for now"
+            );
+
+            let mut first_u128_chunk: LinearCombination<E> = allocated_chunks[0].into();
+            first_u128_chunk.add_assign_number_with_coeff(&allocated_chunks[1], shift);
+            let first_u128_chunk = first_u128_chunk.into_num(cs)?;
+
+            let mut second_u128_chunk: LinearCombination<E> = allocated_chunks[2].into();
+            second_u128_chunk.add_assign_number_with_coeff(&allocated_chunks[3], shift);
+            let second_u128_chunk = second_u128_chunk.into_num(cs)?;
+
+            let max_field_element = minus_one;
+            let (first_max_element_chunk, second_max_element_chunk) = {
+                let fe_repr: Vec<_> = max_field_element
+                    .into_repr()
+                    .as_ref()
+                    .iter()
+                    .map(|value| E::Fr::from_repr((*value).into()).unwrap())
+                    .collect();
+
+                let mut first_chunk = fe_repr[1];
+                first_chunk.mul_assign(&shift);
+                first_chunk.add_assign(&fe_repr[0]);
+
+                let mut second_chunk = fe_repr[3];
+                second_chunk.mul_assign(&shift);
+                second_chunk.add_assign(&fe_repr[2]);
+
+                (Num::Constant(first_chunk), Num::Constant(second_chunk))
+            };
+
+            let check = second_max_element_chunk.sub(cs, &second_u128_chunk)?;
+            range_check_for_num_bits(cs, &check, 128)?;
+            let flag = check.is_zero(cs)?.not();
+
+            let mut double_shift_repr = E::Fr::one().into_repr();
+            double_shift_repr.shl(2 * Self::ORDER_BITS as u32);
+            let double_shift = E::Fr::from_repr(double_shift_repr).unwrap();
+
+            let mut check_2: LinearCombination<E> = first_max_element_chunk.into();
+            check_2.add_assign_number_with_coeff(&first_u128_chunk, minus_one);
+            check_2.add_assign_boolean_with_coeff(&flag, double_shift);
+            let check_2 = check_2.into_num(cs)?;
+            range_check_for_num_bits(cs, &check_2, 144)?;
+
+            // Now we can get Goldilocks elements from N u64 chunks
+            let mut neg_modulus = E::Fr::from_repr(Self::ORDER.into()).unwrap();
+            neg_modulus.negate();
+            for i in 0..N {
+                let mut result_element: LinearCombination<E> = allocated_chunks[i].into();
+                let overflow_flag = Boolean::alloc(cs, overflowing[i])?;
+                result_element.add_assign_boolean_with_coeff(&overflow_flag, neg_modulus);
+                let result_num = result_element.into_num(cs)?;
+
+                result[i] = Self::from_num(cs, result_num)?;
+            }
         }
 
         Ok(result)
