@@ -634,7 +634,7 @@ impl<E: Engine> GoldilocksFieldExt<E> {
             divs[1] = Some(E::Fr::from_str(&div_y.to_string()).unwrap());
         }
 
-        if self.is_constant() && other.is_constant() {
+        if self.is_constant() && other.is_constant() && third.is_constant() {
             return Ok(
                 Self::constant(
                     [res_witness[0].unwrap(), res_witness[1].unwrap()]
