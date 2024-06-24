@@ -14,12 +14,14 @@ default = ["multicore", "plonk"]
 multicore = ["bellman/multicore"]
 plonk = ["bellman/plonk"]
 allocator = ["bellman/allocator"]
- 
+
 [dependencies]
 derivative = "2"
 
-# boojum = {package = "boojum", path = "../boojum" }
-boojum = {git = "https://github.com/matter-labs/era-boojum.git", branch = "main"}
+# TODO: change to use matter-labs when everything is merged:
+# boojum = {git = "https://github.com/matter-labs/era-boojum.git", branch = "dl-precompiles"}
+boojum = {git = "https://github.com/distributed-lab/era-boojum", branch = "feature/bn254-ec-pairing"}
+# boojum = {package = "boojum", path = "../era-boojum" }
 
 rand = "0.4"
 digest = "0.9"
